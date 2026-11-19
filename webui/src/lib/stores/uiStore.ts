@@ -3,7 +3,12 @@
 import { ref } from "vue";
 import { toast } from "kernelsu";
 import { fetchAvailableLanguages, switchLocale } from "../../locales";
+import { MODULE_ID } from "../constants";
 import type { UiStyle } from "../types";
+
+// localStorage 键按模块 ID 命名空间隔离，避免与其它 KernelSU 模块的 WebUI（如同源的
+// hybrid_mount）共享语言/UI 风格/Monet 状态。
+const storageKey = (key: string): string => `${MODULE_ID}.${key}`;
 
 const lang = ref("en-US");
 const isReady = ref(false);
@@ -42,13 +47,13 @@ function setLang(code: string): void {
 
 function setUiStyle(style: UiStyle): void {
   uiStyle.value = style;
-  localStorage.setItem("uiStyle", style);
+  localStorage.setItem(storageKey("uiStyle"), style);
   applyMonetClass();
 }
 
 function setMonetEnabled(enabled: boolean): void {
   monetEnabled.value = enabled;
-  localStorage.setItem("monetEnabled", enabled ? "1" : "0");
+  localStorage.setItem(storageKey("monetEnabled"), enabled ? "1" : "0");
   applyMonetClass();
 }
 
@@ -62,15 +67,15 @@ async function init(): Promise<void> {
   } catch {
     // 忽略：语言列表加载失败不阻塞启动
   }
-  const savedLocale = localStorage.getItem("locale") || "en-US";
+  const savedLocale = localStorage.getItem(storageKey("locale")) || "en-US";
   await switchLocale(savedLocale);
   lang.value = savedLocale;
 
-  const savedStyle = localStorage.getItem("uiStyle");
+  const savedStyle = localStorage.getItem(storageKey("uiStyle"));
   if (savedStyle === "miuix" || savedStyle === "md3") {
     uiStyle.value = savedStyle;
   }
-  monetEnabled.value = localStorage.getItem("monetEnabled") === "1";
+  monetEnabled.value = localStorage.getItem(storageKey("monetEnabled")) === "1";
   applyMonetClass();
   isReady.value = true;
 }

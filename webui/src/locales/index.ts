@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createI18n } from "vue-i18n";
+import { MODULE_ID } from "../lib/constants";
 
 type LocaleMessage = { [key: string]: LocaleMessage | string };
 
@@ -47,7 +48,7 @@ export async function switchLocale(locale: string): Promise<void> {
   await loadLocale("en-US");
   if (locale !== "en-US") await loadLocale(locale);
   i18n.global.locale.value = locale;
-  localStorage.setItem("locale", locale);
+  localStorage.setItem(`${MODULE_ID}.locale`, locale);
   document.documentElement.lang = locale;
 }
 
