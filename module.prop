@@ -1,6 +1,6 @@
 id=openp2p-tunnel
 name=OpenP2P Tunnel
-version=1.1.9
+version=1.2.0
 versionCode=10120
 author=AxoNex
 description=OpenP2P 虚拟组网
