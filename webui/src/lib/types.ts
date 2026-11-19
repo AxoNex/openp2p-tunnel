@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+export type UiStyle = "miuix" | "md3";
+
 export interface NetworkConfig {
   Token: string;
   Node: string;

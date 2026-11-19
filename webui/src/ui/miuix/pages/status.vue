@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   MiuixCard,
   MiuixSmallTitle,
@@ -12,10 +13,12 @@ import {
   MiuixProgressIndicator,
 } from "miuix-vue";
 import { Refresh, Settings } from "miuix-vue/icons";
-import { showSnackbar } from "miuix-vue";
 import StatusCard from "../components/StatusCard.vue";
 import { api } from "../../lib/api";
+import { uiStore } from "../../lib/stores/uiStore";
 import type { ServiceStatus, TunStatus } from "../../lib/types";
+
+const { t } = useI18n();
 
 const status = ref<ServiceStatus | null>(null);
 const tun = ref<TunStatus | null>(null);
@@ -28,40 +31,41 @@ const statusKind = computed<"checking" | "normal" | "abnormal">(() => {
 });
 
 const statusTitle = computed(() => {
-  if (!status.value) return "检测中…";
-  return status.value.running ? "运行中" : "已停止";
+  if (!status.value) return t("common.detecting");
+  return status.value.running ? t("status.running") : t("status.stopped");
 });
 
 const statusSummary = computed(() => {
-  if (!status.value) return "正在获取服务状态";
-  if (status.value.running) return `版本 ${status.value.version || "-"}`;
-  if (!status.value.token_configured) return "尚未配置 Token，请到「配置」页填写";
-  return "点击下方按钮启动服务";
+  if (!status.value) return t("status.gettingStatus");
+  if (status.value.running)
+    return t("status.versionOf", { version: status.value.version || "-" });
+  if (!status.value.token_configured) return t("status.tokenNotConfigured");
+  return t("status.clickToStart");
 });
 
 const tokenLabel = computed(() =>
-  status.value?.token_configured ? "已配置" : "未配置",
+  status.value?.token_configured ? t("status.configured") : t("status.notConfigured"),
 );
 
 async function load(): Promise<void> {
   try {
-    const [s, t] = await Promise.all([api.getStatus(), api.getTun()]);
+    const [s, tu] = await Promise.all([api.getStatus(), api.getTun()]);
     status.value = s;
-    tun.value = t;
+    tun.value = tu;
   } catch (e) {
-    showSnackbar({ message: (e as Error).message });
+    uiStore.notify((e as Error).message);
   }
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function run(
+  action: "start" | "stop" | "restart",
   fn: () => Promise<unknown>,
-  label: string,
   expectRunning: boolean,
 ): Promise<void> {
   busy.value = true;
-  busyLabel.value = `${label}中…`;
+  busyLabel.value = t(`status.${action}ing`);
   try {
     await fn();
     // 命令已异步返回, 轮询状态直到到位 (转圈 + 实时更新卡片, 不阻塞 UI)
@@ -78,9 +82,12 @@ async function run(
         }
       }
     }
-    showSnackbar({ message: matched ? `${label}完成` : `${label}超时，请稍后刷新` });
+    const label = t(`status.${action}`);
+    uiStore.notify(
+      matched ? t("status.done", { label }) : t("status.timeout", { label }),
+    );
   } catch (e) {
-    showSnackbar({ message: (e as Error).message });
+    uiStore.notify((e as Error).message);
   } finally {
     busy.value = false;
     busyLabel.value = "";
@@ -100,56 +107,56 @@ onMounted(load);
       :summary="statusSummary"
     />
 
-    <MiuixSmallTitle text="服务信息" />
+    <MiuixSmallTitle :text="t('status.serviceInfo')" />
     <MiuixCard class="card">
-      <MiuixBasicComponent title="运行状态">
+      <MiuixBasicComponent :title="t('status.runState')">
         <template #start>
           <MiuixIcon :icon="Settings" weight="medium" />
         </template>
         <template #end>
-          <MiuixText>{{ status?.running ? "运行中" : "已停止" }}</MiuixText>
+          <MiuixText>{{ status?.running ? t("status.running") : t("status.stopped") }}</MiuixText>
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="进程 PID">
+      <MiuixBasicComponent :title="t('status.processPid')">
         <template #end>
           <MiuixText>{{ status?.pid || "-" }}</MiuixText>
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="Token">
+      <MiuixBasicComponent :title="t('status.token')">
         <template #end>
           <MiuixText>{{ tokenLabel }}</MiuixText>
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="节点名称">
+      <MiuixBasicComponent :title="t('status.nodeName')">
         <template #end>
           <MiuixText>{{ status?.node || "-" }}</MiuixText>
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="版本">
+      <MiuixBasicComponent :title="t('info.coreVersion')">
         <template #end>
           <MiuixText>{{ status?.version || "-" }}</MiuixText>
         </template>
       </MiuixBasicComponent>
     </MiuixCard>
 
-    <MiuixSmallTitle text="虚拟网卡" />
+    <MiuixSmallTitle :text="t('status.virtualNic')" />
     <MiuixCard class="card">
-      <MiuixBasicComponent title="optun 网卡">
+      <MiuixBasicComponent :title="t('status.optun')">
         <template #start>
           <MiuixIcon :icon="Settings" weight="medium" />
         </template>
         <template #end>
-          <MiuixText>{{ tun?.optun === "up" ? "已上线" : "未建立" }}</MiuixText>
+          <MiuixText>{{ tun?.optun === "up" ? t("status.up") : t("status.down") }}</MiuixText>
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="虚拟 IP">
+      <MiuixBasicComponent :title="t('status.virtualIp')">
         <template #end>
           <MiuixText>{{ tun?.addr || "-" }}</MiuixText>
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="IPv4 转发">
+      <MiuixBasicComponent :title="t('status.ipForward')">
         <template #end>
-          <MiuixText>{{ tun?.ip_forward === "1" ? "已开启" : "未开启" }}</MiuixText>
+          <MiuixText>{{ tun?.ip_forward === "1" ? t("status.on") : t("status.off") }}</MiuixText>
         </template>
       </MiuixBasicComponent>
     </MiuixCard>
@@ -161,8 +168,8 @@ onMounted(load);
       </div>
       <div class="action-bar">
         <MiuixIconButton
-          aria-label="刷新"
-          title="刷新"
+          :aria-label="t('common.refresh')"
+          :title="t('common.refresh')"
           :disabled="busy"
           @click="load"
         >
@@ -173,25 +180,25 @@ onMounted(load);
           type="primary"
           class="grow"
           :disabled="busy"
-          @click="run(api.start, '启动', true)"
+          @click="run('start', api.start, true)"
         >
-          启动
+          {{ t("status.start") }}
         </MiuixButton>
         <MiuixButton
           v-else
           class="grow"
           :disabled="busy"
-          @click="run(api.stop, '停止', false)"
+          @click="run('stop', api.stop, false)"
         >
-          停止
+          {{ t("status.stop") }}
         </MiuixButton>
         <MiuixButton
           v-if="status?.running"
           class="grow"
           :disabled="busy"
-          @click="run(api.restart, '重启', true)"
+          @click="run('restart', api.restart, true)"
         >
-          重启
+          {{ t("status.restart") }}
         </MiuixButton>
       </div>
     </MiuixCard>

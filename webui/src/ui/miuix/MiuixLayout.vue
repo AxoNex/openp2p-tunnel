@@ -3,6 +3,7 @@
 import "miuix-vue/style.css";
 import "./theme.css";
 import type { Component } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   MiuixSnackbarHost,
   MiuixScrollArea,
@@ -11,6 +12,8 @@ import {
   MiuixTopAppBar,
 } from "miuix-vue";
 import { ScreenMirroring, Settings, Folder, Info } from "miuix-vue/icons";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   navindex: number;
@@ -32,7 +35,7 @@ function selectTab(index: number): void {
 
 <template>
   <div class="app">
-    <MiuixTopAppBar :large="false" title="OpenP2P Tunnel" class="app__top-app-bar" />
+    <MiuixTopAppBar :large="false" :title="t('common.appName')" class="app__top-app-bar" />
 
     <main class="app__body">
       <div

@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   MiuixCard,
   MiuixSmallTitle,
@@ -11,17 +12,24 @@ import {
 import { api } from "../../lib/api";
 import {
   MODULE_NAME,
-  MODULE_VERSION,
   MODULE_AUTHOR,
   MODULE_LICENSE,
   MODULE_ID,
   REPOSITORY_URL,
 } from "../../lib/constants";
 
+const { t } = useI18n();
+
+const moduleVersion = ref("");
 const coreVersion = ref("");
 const nodeName = ref("");
 
 onMounted(async () => {
+  try {
+    moduleVersion.value = await api.getModuleVersion();
+  } catch {
+    // 忽略：桥接不可用或模块目录不可读时不阻塞页面渲染
+  }
   try {
     const st = await api.getStatus();
     coreVersion.value = st.version;
@@ -37,7 +45,7 @@ onMounted(async () => {
     <div class="about-hero">
       <h1>{{ MODULE_NAME }}</h1>
       <MiuixText color="var(--m-color-on-background)" type="subtitle">
-        v{{ MODULE_VERSION }}
+        v{{ moduleVersion || "…" }}
       </MiuixText>
       <MiuixText color="var(--m-color-on-background)" type="body2">
         {{ MODULE_LICENSE }} · {{ MODULE_AUTHOR }}
@@ -46,57 +54,52 @@ onMounted(async () => {
 
     <MiuixCard class="card" style="padding-top: 12px">
       <MiuixArrowPreference
-        title="开源仓库"
-        summary="github.com/AxoNex/openp2p-tunnel"
+        :title="t('info.repository')"
+        :summary="REPOSITORY_URL"
         clickable
         @click="api.openLink(REPOSITORY_URL)"
       />
     </MiuixCard>
 
-    <MiuixSmallTitle text="模块信息" />
+    <MiuixSmallTitle :text="t('info.moduleInfo')" />
     <MiuixCard class="card">
-      <MiuixBasicComponent title="模块 ID">
+      <MiuixBasicComponent :title="t('info.moduleId')">
         <template #end>
           <MiuixText>{{ MODULE_ID }}</MiuixText>
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="模块版本">
+      <MiuixBasicComponent :title="t('info.moduleVersion')">
         <template #end>
-          <MiuixText>{{ MODULE_VERSION }}</MiuixText>
+          <MiuixText>{{ moduleVersion || "-" }}</MiuixText>
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="核心版本">
+      <MiuixBasicComponent :title="t('info.coreVersion')">
         <template #end>
           <MiuixText>{{ coreVersion || "-" }}</MiuixText>
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="节点名称">
+      <MiuixBasicComponent :title="t('info.nodeName')">
         <template #end>
           <MiuixText>{{ nodeName || "-" }}</MiuixText>
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="作者">
+      <MiuixBasicComponent :title="t('info.author')">
         <template #end>
           <MiuixText>{{ MODULE_AUTHOR }}</MiuixText>
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="许可证">
+      <MiuixBasicComponent :title="t('info.license')">
         <template #end>
           <MiuixText>{{ MODULE_LICENSE }}</MiuixText>
         </template>
       </MiuixBasicComponent>
     </MiuixCard>
 
-    <MiuixSmallTitle text="开源组件" />
+    <MiuixSmallTitle :text="t('info.components')" />
     <MiuixCard class="card">
-      <MiuixBasicComponent
-        title="openp2p"
-        summary="OpenP2P 内网穿透内核，随模块打包 linux-arm64 构建"
-      />
-      <MiuixBasicComponent
-        title="miuix-vue"
-        summary="Miuix 风格 Vue 3 组件库，驱动本 WebUI 界面"
-      />
+      <MiuixBasicComponent title="openp2p" :summary="t('info.openp2p')" />
+      <MiuixBasicComponent title="miuix-vue" :summary="t('info.miuixVue')" />
+      <MiuixBasicComponent title="@material/web" :summary="t('info.materialWeb')" />
     </MiuixCard>
   </div>
 </template>

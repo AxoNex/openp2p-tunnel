@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   MiuixCard,
   MiuixSmallTitle,
@@ -15,9 +16,11 @@ import {
   MiuixDialog,
 } from "miuix-vue";
 import { Refresh, Settings } from "miuix-vue/icons";
-import { showSnackbar } from "miuix-vue";
 import { api } from "../../lib/api";
-import type { AppConfig, UpdateResult } from "../../lib/types";
+import { uiStore } from "../../lib/stores/uiStore";
+import type { AppConfig, UpdateResult, UiStyle } from "../../lib/types";
+
+const { t } = useI18n();
 
 const config = ref<AppConfig | null>(null);
 const saving = ref(false);
@@ -27,6 +30,11 @@ const updating = ref(false);
 const updateStage = ref("");
 const showErrorDialog = ref(false);
 const errorMessage = ref("");
+
+// UI 偏好 (设置段)
+const langCode = ref(uiStore.lang);
+const styleCode = ref<UiStyle>(uiStore.uiStyle);
+const monet = ref(uiStore.monetEnabled);
 
 const token = computed({
   get: () => config.value?.network.Token ?? "",
@@ -69,7 +77,7 @@ async function load(): Promise<void> {
   try {
     config.value = await api.getConfig();
   } catch (e) {
-    showSnackbar({ message: (e as Error).message });
+    uiStore.notify((e as Error).message);
   }
 }
 
@@ -83,15 +91,22 @@ async function loadVersion(): Promise<void> {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-const stageText: Record<string, string> = {
-  checking: "正在下载并检查最新版本…",
-  downloading: "已发现新版本，正在下载替换…",
-  restarting: "替换完成，正在重启服务…",
-};
+function stageLabel(stage: string): string {
+  switch (stage) {
+    case "checking":
+      return t("config.checking");
+    case "downloading":
+      return t("config.downloading");
+    case "restarting":
+      return t("config.restarting");
+    default:
+      return stage;
+  }
+}
 
 async function updateCore(): Promise<void> {
   updating.value = true;
-  updateStage.value = stageText.checking;
+  updateStage.value = t("config.checking");
   updateResult.value = null;
   try {
     await api.update(); // 异步启动后台任务, 立即返回
@@ -112,20 +127,20 @@ async function updateCore(): Promise<void> {
         };
         updateResult.value = result;
         if (result.up_to_date) {
-          showSnackbar({ message: `已是最新版本 (${result.current})` });
+          uiStore.notify(`${t("config.upToDateSnack")} (${result.current})`);
         } else if (result.ok) {
-          showSnackbar({ message: `核心已更新到 ${result.new || "最新版本"}` });
+          uiStore.notify(t("config.updatedSnack", { version: result.new || "?" }));
         } else {
-          showError(result.message || "更新失败");
+          showError(result.message || t("config.updateFailed"));
         }
         break;
       }
       if (st.running && st.stage) {
-        updateStage.value = stageText[st.stage] ?? st.stage;
+        updateStage.value = stageLabel(st.stage);
       }
     }
     if (!done) {
-      showError("更新超时，请在终端运行 openp2pctl update --human 查看详情");
+      showError(t("config.updateTimeout"));
     }
     await loadVersion();
   } catch (e) {
@@ -143,7 +158,7 @@ function showError(msg: string): void {
 
 async function copyError(): Promise<void> {
   const ok = await copyText(errorMessage.value);
-  showSnackbar({ message: ok ? "已复制到剪贴板" : "复制失败" });
+  uiStore.notify(ok ? t("config.copied") : t("config.copyFailed"));
 }
 
 async function copyText(text: string): Promise<boolean> {
@@ -175,12 +190,24 @@ async function save(): Promise<void> {
   saving.value = true;
   try {
     await api.saveConfig(config.value);
-    showSnackbar({ message: "配置已保存（不会自动重启，需手动启动/重启后生效）" });
+    uiStore.notify(t("config.saved"));
   } catch (e) {
-    showSnackbar({ message: (e as Error).message });
+    uiStore.notify((e as Error).message);
   } finally {
     saving.value = false;
   }
+}
+
+function onLangChange(): void {
+  uiStore.setLang(langCode.value);
+}
+
+function onStyleChange(): void {
+  uiStore.setUiStyle(styleCode.value);
+}
+
+function onMonetChange(): void {
+  uiStore.setMonetEnabled(monet.value);
 }
 
 onMounted(() => {
@@ -191,67 +218,75 @@ onMounted(() => {
 
 <template>
   <div class="page">
-    <MiuixSmallTitle text="网络" />
+    <MiuixSmallTitle :text="t('config.network')" />
     <MiuixCard class="card">
       <MiuixBasicComponent
-        title="Token"
-        summary="在 openp2p 控制台获取"
+        :title="t('config.tokenLabel')"
+        :summary="t('config.tokenSummary')"
       >
         <template #start>
           <MiuixIcon :icon="Settings" weight="medium" />
         </template>
         <template #bottom>
-          <MiuixInput v-model="token" aria-label="Token" placeholder="请输入 Token" />
+          <MiuixInput
+            v-model="token"
+            :aria-label="t('config.tokenLabel')"
+            :placeholder="t('config.tokenPlaceholder')"
+          />
         </template>
       </MiuixBasicComponent>
       <MiuixBasicComponent
-        title="节点名称"
-        summary="留空则自动使用「品牌-型号」"
+        :title="t('config.nodeName')"
+        :summary="t('config.nodeNameSummary')"
       >
         <template #bottom>
-          <MiuixInput v-model="node" aria-label="节点名称" placeholder="自动" />
+          <MiuixInput v-model="node" :aria-label="t('config.nodeName')" />
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="服务器地址">
+      <MiuixBasicComponent :title="t('config.serverHost')">
         <template #bottom>
-          <MiuixInput v-model="serverHost" aria-label="服务器地址" />
+          <MiuixInput v-model="serverHost" :aria-label="t('config.serverHost')" />
         </template>
       </MiuixBasicComponent>
     </MiuixCard>
 
-    <MiuixSmallTitle text="选项" />
+    <MiuixSmallTitle :text="t('config.options')" />
     <MiuixCard class="card">
-      <MiuixBasicComponent title="共享带宽 (Mbps)">
+      <MiuixBasicComponent :title="t('config.shareBandwidth')">
         <template #bottom>
-          <MiuixInput v-model="shareBandwidth" aria-label="共享带宽" inputmode="numeric" />
+          <MiuixInput
+            v-model="shareBandwidth"
+            :aria-label="t('config.shareBandwidth')"
+            inputmode="numeric"
+          />
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="跳过 TLS 证书校验">
+      <MiuixBasicComponent :title="t('config.skipTls')">
         <template #end>
           <MiuixSwitch v-model="insecure" />
         </template>
       </MiuixBasicComponent>
-      <MiuixBasicComponent title="时区">
+      <MiuixBasicComponent :title="t('config.timezone')">
         <template #bottom>
-          <MiuixInput v-model="timezone" aria-label="时区" />
+          <MiuixInput v-model="timezone" :aria-label="t('config.timezone')" />
         </template>
       </MiuixBasicComponent>
     </MiuixCard>
 
-    <MiuixSmallTitle text="核心更新" />
+    <MiuixSmallTitle :text="t('config.coreUpdate')" />
     <MiuixCard class="card">
       <MiuixBasicComponent
-        title="当前版本"
-        summary="从 openp2p 控制台下载最新 linux-arm64 核心"
+        :title="t('config.currentVersion')"
+        :summary="t('config.coreUpdateSummary')"
       >
         <template #end>
-          <MiuixText>{{ currentVersion || "检测中…" }}</MiuixText>
+          <MiuixText>{{ currentVersion || t("common.detecting") }}</MiuixText>
         </template>
       </MiuixBasicComponent>
       <MiuixBasicComponent
         v-if="updating"
-        title="更新进度"
-        summary="请勿关闭页面"
+        :title="t('config.updateProgress')"
+        :summary="t('config.pleaseWait')"
       >
         <template #end>
           <MiuixProgressIndicator type="infinite" :size="20" />
@@ -262,8 +297,8 @@ onMounted(() => {
       </MiuixBasicComponent>
       <MiuixBasicComponent
         v-else-if="updateResult"
-        :title="updateResult.ok ? '更新结果' : '更新失败'"
-        :summary="updateResult.up_to_date ? '已是最新版本，无需更新' : updateResult.message"
+        :title="updateResult.ok ? t('config.updateResult') : t('config.updateFailed')"
+        :summary="updateResult.up_to_date ? t('config.upToDate') : updateResult.message"
       >
         <template #end>
           <MiuixText>{{ updateResult.new || "-" }}</MiuixText>
@@ -278,21 +313,51 @@ onMounted(() => {
           :disabled="updating"
           @click="updateCore"
         >
-          {{ updating ? "更新中…" : "更新到最新核心" }}
+          {{ updating ? t("config.updating") : t("config.updateToLatest") }}
         </MiuixButton>
       </div>
+    </MiuixCard>
+
+    <MiuixSmallTitle :text="t('config.settings')" />
+    <MiuixCard class="card">
+      <MiuixBasicComponent :title="t('common.language')">
+        <template #bottom>
+          <select v-model="langCode" class="native-select" @change="onLangChange">
+            <option
+              v-for="l in uiStore.availableLanguages"
+              :key="l.code"
+              :value="l.code"
+            >
+              {{ l.display }}
+            </option>
+          </select>
+        </template>
+      </MiuixBasicComponent>
+      <MiuixBasicComponent :title="t('common.uiStyle')">
+        <template #bottom>
+          <select v-model="styleCode" class="native-select" @change="onStyleChange">
+            <option value="miuix">{{ t("common.miuixStyle") }}</option>
+            <option value="md3">{{ t("common.md3Style") }}</option>
+          </select>
+        </template>
+      </MiuixBasicComponent>
+      <MiuixBasicComponent :title="t('config.monetTheme')">
+        <template #end>
+          <MiuixSwitch v-model="monet" @update:model-value="onMonetChange" />
+        </template>
+      </MiuixBasicComponent>
     </MiuixCard>
 
     <!-- 更新失败弹窗 (不自动关闭, 可复制错误信息) -->
     <MiuixDialog
       v-model="showErrorDialog"
-      title="更新失败"
+      :title="t('config.updateFailed')"
       :summary="errorMessage"
     >
       <template #default="{ close }">
         <div class="dialog-actions">
-          <MiuixButton @click="copyError">复制错误信息</MiuixButton>
-          <MiuixButton type="primary" @click="close">关闭</MiuixButton>
+          <MiuixButton @click="copyError">{{ t("config.copyError") }}</MiuixButton>
+          <MiuixButton type="primary" @click="close">{{ t("common.close") }}</MiuixButton>
         </div>
       </template>
     </MiuixDialog>
@@ -300,8 +365,8 @@ onMounted(() => {
     <MiuixCard class="card action-card">
       <div class="action-bar">
         <MiuixIconButton
-          aria-label="重置"
-          title="重新加载"
+          :aria-label="t('common.reset')"
+          :title="t('common.reset')"
           :disabled="saving"
           @click="load"
         >
@@ -313,7 +378,7 @@ onMounted(() => {
           :disabled="saving || !config"
           @click="save"
         >
-          保存
+          {{ t("common.save") }}
         </MiuixButton>
       </div>
     </MiuixCard>
@@ -342,5 +407,15 @@ onMounted(() => {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 8px;
+}
+
+.native-select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--m-color-outline-variant, rgba(0, 0, 0, 0.2));
+  background: var(--m-color-surface-container, transparent);
+  color: var(--m-color-on-surface);
+  font-size: 14px;
 }
 </style>

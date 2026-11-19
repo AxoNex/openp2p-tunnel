@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { PATHS } from "./constants";
+import { PATHS, MODULE_DIR } from "./constants";
 import type {
   AppConfig,
   ServiceStatus,
@@ -51,6 +51,17 @@ export const api = {
   hasBridge,
 
   getStatus: async (): Promise<ServiceStatus> => JSON.parse(await run("status")),
+  // 模块版本从 module.prop 动态读取（不再硬编码在源码中）。
+  getModuleVersion: async (): Promise<string> => {
+    if (!ksuExec) throw new Error(BRIDGE_UNAVAILABLE_MESSAGE);
+    const { errno, stdout, stderr } = await ksuExec(
+      `grep '^version=' ${MODULE_DIR}/module.prop | cut -d= -f2`,
+    );
+    if (errno !== 0 || !stdout.trim()) {
+      throw new Error(stderr.trim() || "读取模块版本失败");
+    }
+    return stdout.trim();
+  },
   getTun: async (): Promise<TunStatus> => JSON.parse(await run("tun")),
   getConfig: async (): Promise<AppConfig> => JSON.parse(await run("config", ["get"])),
   getLog: async (lines = 100): Promise<string> => run("log", [String(lines)]),
