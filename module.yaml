@@ -1,5 +1,5 @@
 schemaVersion: 1
-id: io.github.axonex.openp2p-tunnel
+id: openp2p-tunnel
 name: OpenP2P Tunnel
 summary: 基于 OpenP2P 的系统级虚拟组网（TUN）模块
 description: README.md
