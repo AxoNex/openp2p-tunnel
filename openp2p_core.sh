@@ -5,7 +5,7 @@
 
 MODDIR=${0%/*}
 MODID=$(basename "$MODDIR")
-DATA_DIR="/sdcard/Documents/${MODID}"
+DATA_DIR="${MODDIR}"
 CONFIG_FILE="${DATA_DIR}/config/config.json"
 LOG_DIR="${DATA_DIR}/log"
 LOG_FILE="${LOG_DIR}/openp2p_core.log"
@@ -208,7 +208,7 @@ while true; do
                     -serverhost "${SERVER_HOST}" \
                     -loglevel "${LOG_LEVEL}" \
                     -sharebandwidth "${SHARE_BANDWIDTH}" \
-                    ${EXTRA_ARGS} > "${LOG_DIR}/openp2p.log" 2>&1 &
+                    ${EXTRA_ARGS} > "${LOG_DIR}/openp2p_console.log" 2>&1 &
 
                 sleep 3
 

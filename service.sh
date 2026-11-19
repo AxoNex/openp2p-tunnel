@@ -4,7 +4,7 @@
 
 MODDIR=${0%/*}
 MODID=$(basename "$MODDIR")
-DATA_DIR="/sdcard/Documents/${MODID}"
+DATA_DIR="${MODDIR}"
 LOG_DIR="${DATA_DIR}/log"
 LOG_FILE="${LOG_DIR}/service.log"
 

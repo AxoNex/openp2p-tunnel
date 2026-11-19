@@ -17,7 +17,7 @@
 
 MODDIR="$(cd "$(dirname "$0")" && pwd)"
 MODID=$(basename "$MODDIR")
-DATA_DIR="/sdcard/Documents/${MODID}"
+DATA_DIR="${MODDIR}"
 CONFIG_FILE="${DATA_DIR}/config/config.json"
 DEFAULT_CONFIG="${MODDIR}/config/config.json"
 LOG_DIR="${DATA_DIR}/log"
@@ -80,7 +80,7 @@ get_version() {
     # 3) openp2p -v (会先写 log, 若 log 目录不可写则 log.Fatal 退出, 故放最后)
     local v=""
     v=$(grep -hoE 'version: [0-9]+\.[0-9]+\.[0-9]+' \
-        "${DATA_DIR}/log/openp2p.log" "${MODDIR}/log/openp2p.log" 2>/dev/null \
+        "${MODDIR}/log/openp2p.log" 2>/dev/null \
         | tail -1 | sed -E 's/version: //')
     if [ -z "$v" ]; then
         # 二进制内提取 3.x.y (取数值最大者 = OpenP2PVersion; 不能按字典序, "3.9.0" 字典序大于 "3.25.11")
@@ -202,7 +202,7 @@ tun_addr() {
     if [ -z "$a" ]; then
         # 从运行日志解析虚拟 IP: "sdwan init: start tun 10.9.0.2/24"
         a=$(grep -m1 -oE 'start tun [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+' \
-            "${DATA_DIR}/log/openp2p.log" "${MODDIR}/log/openp2p.log" 2>/dev/null \
+            "${MODDIR}/log/openp2p.log" 2>/dev/null \
             | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
     fi
     echo "$a"
@@ -352,7 +352,7 @@ cmd_diag() {
     fi
     echo ""
     echo "=== SDWAN 日志 (最近) ==="
-    grep -hoE 'sdwan init[^ ]*:.*' "${DATA_DIR}/log/openp2p.log" "${MODDIR}/log/openp2p.log" 2>/dev/null | tail -8
+    grep -hoE 'sdwan init[^ ]*:.*' "${MODDIR}/log/openp2p.log" 2>/dev/null | tail -8
     return 0
 }
 
