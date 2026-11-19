@@ -8,7 +8,7 @@
 
 - 添加 `LICENSE`（Apache-2.0）文件。
 - GitHub Actions 持续集成与发布：
-  - `ci.yml`：推送 `main` 分支自动构建 canary 测试版并更新 `canary` release（固定下载链接）。
+  - `ci.yml`：推送 `main` 分支自动构建 canary 测试版并上传为 Artifact（不再创建 release）。
   - `release.yml`：推送 `v*` tag 自动构建正式版并发布 release（自动校验 tag 与 `module.prop` 版本一致）。
 - `scripts/fetch-binary.sh`：CI 辅助脚本，从官方源下载 openp2p 核心二进制。
 - `build.sh` 新增 `--fetch-binary`（自动下载二进制）与 `--canary`（输出固定文件名 `openp2p-tunnel-canary.zip`）。

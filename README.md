@@ -19,9 +19,9 @@
 | 类型 | 说明 | 链接 |
 |------|------|------|
 | **正式版（Release）** | 稳定版本，打 `v*` tag 时自动构建并发布 | <https://github.com/AxoNex/openp2p-tunnel/releases/latest> |
-| **测试版（Canary）** | 每次推送到 `main` 分支自动构建，对应最新开发进度，**不稳定**，仅用于测试 | <https://github.com/AxoNex/openp2p-tunnel/releases/download/canary/openp2p-tunnel-canary.zip> |
+| **测试版（Canary）** | 每次推送到 `main` 分支自动构建，对应最新开发进度，**不稳定**，仅用于测试 | <https://github.com/AxoNex/openp2p-tunnel/actions> |
 
-> Release 页面下载 `openp2p-tunnel-<版本>.zip`；Canary 固定文件名 `openp2p-tunnel-canary.zip`（每次构建覆盖更新）。
+> 正式版在 Release 页面下载 `openp2p-tunnel-<版本>.zip`；Canary 不再发布 Release，改为在 GitHub Actions 页面下载构建产物（Artifact）：点开最新一次 run，在页面底部「Artifacts」区下载 `openp2p-tunnel-canary`，解压后得到 `openp2p-tunnel-canary.zip`。
 
 ## 安装
 

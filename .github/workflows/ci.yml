@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-canary:
@@ -37,14 +37,3 @@ jobs:
           name: openp2p-tunnel-canary
           path: openp2p-tunnel-canary.zip
           retention-days: 30
-
-      - name: 更新 canary release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete canary --yes --cleanup-tag 2>/dev/null || true
-          gh release create canary openp2p-tunnel-canary.zip \
-            --prerelease \
-            --title "Canary Build" \
-            --notes "⚠️ 自动构建的 Canary 测试版（对应 main 分支最新提交 ${GITHUB_SHA}）。仅用于测试，不建议生产环境。"
