@@ -48,6 +48,7 @@ esac
 TMPDIR="${TMPDIR:-/data/local/tmp}"
 WORKDIR="${TMPDIR}/openp2p-dl"
 mkdir -p "$WORKDIR" 2>/dev/null
+trap 'rm -rf "$WORKDIR"' EXIT
 cd "$WORKDIR" || exit 1
 rm -f openp2p.tar.gz openp2p
 
