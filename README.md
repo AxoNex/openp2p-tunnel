@@ -52,7 +52,7 @@ WebUI 源码位于 `webui/`（Vue 3 + Vite + `miuix-vue`）。需在**联网**�
 
 ```sh
 cd webui
-pnpm install --frozen-lockfile
+pnpm install        # 首次会更新 pnpm-lock.yaml
 pnpm build          # 产物输出到 ../webroot
 ```
 

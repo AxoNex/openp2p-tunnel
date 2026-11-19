@@ -43,7 +43,9 @@ fi
 
 echo "==> 构建 WebUI (版本 ${VERSION})"
 cd "${MODULE_DIR}/webui"
-pnpm install --frozen-lockfile
+# 用 --no-frozen-lockfile: 允许依赖新增/升级时自动更新 lockfile。
+# (CI 环境默认 --frozen-lockfile 会在 lockfile 落后 package.json 时直接报错)
+pnpm install --no-frozen-lockfile
 MODULE_ID="${MODULE_ID}" pnpm build
 cd "${MODULE_DIR}"
 
