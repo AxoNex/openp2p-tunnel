@@ -1,0 +1,3 @@
+# 统一文本文件换行符为 LF
+# Android 上的 shell 脚本必须使用 LF，CRLF 会破坏脚本执行
+* text=auto eol=lf

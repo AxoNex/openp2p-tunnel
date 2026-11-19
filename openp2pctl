@@ -1,0 +1,621 @@
+#!/system/bin/sh
+# openp2p-tunnel 控制脚本 (WebUI 后端)
+# 被 KernelSU WebUI 通过 ksu.exec 调用, 输出 JSON 到 stdout (日志/诊断→stderr)
+# 用法: openp2pctl <subcommand> [args...]
+#   status                    → 运行状态 JSON
+#   start / stop / restart / toggle
+#   config get                → 输出完整 config.json
+#   config import <base64>    → base64 解码后覆盖 config.json
+#   config path               → 输出 config.json 路径
+#   log [lines]               → 输出 openp2p 日志末尾 N 行
+#   tun                       → optun 虚拟网卡状态 JSON
+#   version                   → openp2p 二进制版本
+#   diag                      → 完整诊断 (网络/路由/iptables/进程/日志)
+#   netfix                    → 修复跨设备连通性 (子网路由 + FORWARD/SNAT, 重启恢复)
+#   update [<版本>]            → 更新 openp2p 核心 (下载 latest linux-arm64, 替换并重启)
+# 所有子命令加 --human 输出人类可读文本 (供 action.sh / 终端)
+
+MODDIR="$(cd "$(dirname "$0")" && pwd)"
+MODID=$(basename "$MODDIR")
+DATA_DIR="/sdcard/Documents/${MODID}"
+CONFIG_FILE="${DATA_DIR}/config/config.json"
+DEFAULT_CONFIG="${MODDIR}/config/config.json"
+LOG_DIR="${DATA_DIR}/log"
+RUN_LOG="${LOG_DIR}/openp2p.log"
+OPENP2P="${MODDIR}/openp2p"
+UPDATE_STATE="${DATA_DIR}/update.state"
+MODULE_PROP="${MODDIR}/module.prop"
+
+mkdir -p "${DATA_DIR}/config" "${LOG_DIR}" 2>/dev/null
+
+HUMAN=0
+for a in "$@"; do
+    [ "$a" = "--human" ] && HUMAN=1
+done
+
+log() { echo "$@" >&2; }
+
+# 同步 module.prop 描述 (KernelSU 模块页展示; sed -i 写回同一路径, 尽量保留文件属性)
+update_desc() {
+    sed -i "/^description=/c\description=[状态]${1}" "${MODULE_PROP}" 2>/dev/null
+}
+
+json_escape() {
+    # 转义 JSON 字符串中的反斜杠/双引号 (最小安全版, 不用 \x0a/\r 等非 POSIX 转义,
+    # toybox sed 对 \x 十六进制转义可能报错导致整个 sed 失败返回空)
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+json_get() {
+    local key="$1" default="$2" type="${3:-str}" val=""
+    [ ! -f "$CONFIG_FILE" ] && { printf '%s' "$default"; return; }
+    case "$type" in
+        str)  val=$(grep -m1 -oE "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$CONFIG_FILE" | sed -E "s/\"${key}\"[[:space:]]*:[[:space:]]*\"([^\"]*)\"/\1/") ;;
+        num)  val=$(grep -m1 -oE "\"${key}\"[[:space:]]*:[[:space:]]*-?[0-9]+(\\.[0-9]+)?" "$CONFIG_FILE" | grep -oE -- "-?[0-9]+(\.[0-9]+)?$") ;;
+        bool) val=$(grep -m1 -oE "\"${key}\"[[:space:]]*:[[:space:]]*(true|false)" "$CONFIG_FILE" | grep -oE "(true|false)$") ;;
+    esac
+    [ -z "$val" ] && printf '%s' "$default" || printf '%s' "$val"
+}
+
+get_token() {
+    [ -f "$CONFIG_FILE" ] || { echo ""; return; }
+    local t=$(grep -m1 -oE '"Token"[[:space:]]*:[[:space:]]*"[^"]+"' "$CONFIG_FILE" | sed -E 's/.*"Token"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+    if [ -z "$t" ] || [ "$t" = "YOUR_TOKEN_HERE" ]; then
+        t=$(grep -m1 -oE '"Token"[[:space:]]*:[[:space:]]*[0-9]+' "$CONFIG_FILE" | grep -oE '[0-9]+$')
+    fi
+    echo "$t"
+}
+
+is_running() { pgrep -x openp2p >/dev/null 2>&1; }
+
+# 守护循环 openp2p_core.sh 是否在运行 (进程名是解释器 sh, 需按命令行匹配)
+is_core_running() { pgrep -f "openp2p_core\.sh" >/dev/null 2>&1; }
+
+get_pid() { pgrep -x openp2p | head -1; }
+
+get_version() {
+    # openp2p 核心版本 (3.x.y)。按可靠性多级回退:
+    # 1) 运行日志 (服务启动必写 "openp2p start. version: X.Y.Z", 不依赖运行环境)
+    # 2) 二进制内提取 (读本目录二进制, 最可靠)
+    # 3) openp2p -v (会先写 log, 若 log 目录不可写则 log.Fatal 退出, 故放最后)
+    local v=""
+    v=$(grep -hoE 'version: [0-9]+\.[0-9]+\.[0-9]+' \
+        "${DATA_DIR}/log/openp2p.log" "${MODDIR}/log/openp2p.log" 2>/dev/null \
+        | tail -1 | sed -E 's/version: //')
+    if [ -z "$v" ]; then
+        # 二进制内提取 3.x.y (取数值最大者 = OpenP2PVersion; 不能按字典序, "3.9.0" 字典序大于 "3.25.11")
+        v=$(grep -aoE '3\.[0-9]+\.[0-9]+' "${OPENP2P}" 2>/dev/null \
+            | awk -F'[.]' '{ k = $2*1000 + $3; if (k > m) { m = k; b = $0 } } END { print b }')
+    fi
+    if [ -z "$v" ]; then
+        mkdir -p "${MODDIR}/log" 2>/dev/null
+        v=$(cd "$MODDIR" 2>/dev/null && "${OPENP2P}" -v 2>/dev/null | head -1)
+    fi
+    echo "$v"
+}
+
+get_node_name() {
+    local n brand model gp
+    n=$(json_get "Node" "" "str")
+    [ -n "$n" ] && { echo "$n"; return; }
+    gp=$(command -v getprop 2>/dev/null); [ -z "$gp" ] && gp="/system/bin/getprop"
+    brand=$("$gp" ro.product.brand 2>/dev/null)
+    model=$("$gp" ro.product.model 2>/dev/null)
+    if [ -n "$brand" ] && [ -n "$model" ]; then
+        echo "${brand}-${model}"
+        return
+    fi
+    brand=$("$gp" ro.product.manufacturer 2>/dev/null)
+    model=$("$gp" ro.product.marketname 2>/dev/null)
+    if [ -n "$brand" ] && [ -n "$model" ]; then
+        echo "${brand}-${model}"
+        return
+    fi
+    n=$("$gp" ro.product.device 2>/dev/null)
+    [ -n "$n" ] && { echo "$n"; return; }
+    n=$("$gp" ro.product.name 2>/dev/null)
+    [ -n "$n" ] && { echo "$n"; return; }
+    n=$("$gp" ro.build.product 2>/dev/null)
+    [ -n "$n" ] && { echo "$n"; return; }
+    echo "unknown"
+}
+
+ensure_tun_node() {
+    mkdir -p /dev/net 2>/dev/null
+    if [ ! -e /dev/net/tun ]; then
+        if [ -e /dev/tun ]; then ln -sf /dev/tun /dev/net/tun 2>/dev/null
+        else mknod /dev/net/tun c 10 200 2>/dev/null; fi
+    fi
+    chmod 666 /dev/net/tun /dev/tun 2>/dev/null
+    echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null
+}
+
+# 将 "A.B.C.D/M" 规范化为网络地址 (如 "10.9.0.254/24" → "10.9.0.0/24")
+# 日志里的 gateway 字段存的是「网关IP+掩码」而非网络地址, 直接喂给 ip route/rule 会因主机位非零而失败。
+normalize_cidr() {
+    echo "$1" | awk -F'[/.]' '{
+        b = ($5 != "") ? $5 : 24
+        ip = $1*16777216 + $2*65536 + $3*256 + $4
+        if (b >= 32) { n = ip }
+        else if (b <= 0) { n = 0 }
+        else { s = 1; for (i = b; i < 32; i++) s = s * 2; n = ip - (ip % s) }
+        printf "%d.%d.%d.%d/%d", int(n/16777216)%256, int(n/65536)%256, int(n/256)%256, n%256, b
+    }'
+}
+
+do_start() {
+    ensure_tun_node
+    [ ! -f "$CONFIG_FILE" ] && [ -f "$DEFAULT_CONFIG" ] && cp "$DEFAULT_CONFIG" "$CONFIG_FILE" 2>/dev/null
+
+    local TOKEN=$(get_token)
+    if [ -z "$TOKEN" ] || [ "$TOKEN" = "YOUR_TOKEN_HERE" ]; then
+        [ "$HUMAN" = 1 ] && echo "错误: 请先在配置中填写 Token"
+        return 1
+    fi
+
+    if is_running; then
+        [ "$HUMAN" = 1 ] && echo "已在运行 (pid $(get_pid))"
+        return 0
+    fi
+
+    # 守护循环是服务单元: 未运行则拉起它 (异步返回, 由 core 循环在数秒内拉起 openp2p)
+    if ! is_core_running; then
+        nohup "${MODDIR}/openp2p_core.sh" >/dev/null 2>&1 &
+        _core_pid=$!
+        # 立即把守护循环迁出可能被冻结的应用 cgroup —— 经 ksu.exec / action 启动时会
+        # 继承管理器 App 的 cgroup, 该 App 退后台后 cgroup 冻结会让 openp2p 挂起。
+        # (参考 NetProxy ensureSingBoxRootCgroup)
+        [ -w /sys/fs/cgroup/cgroup.procs ] && echo "$_core_pid" > /sys/fs/cgroup/cgroup.procs 2>/dev/null
+    fi
+    update_desc "启动中"
+    [ "$HUMAN" = 1 ] && echo "启动指令已下发, 守护循环将在数秒内拉起 openp2p"
+    return 0
+}
+
+do_stop() {
+    # 先杀守护循环, 否则它会在下个监控周期自动重启 openp2p
+    pkill -9 -f "openp2p_core\.sh" 2>/dev/null
+    pkill -9 -x openp2p 2>/dev/null
+    sleep 1
+    update_desc "已停止"
+    [ "$HUMAN" = 1 ] && echo "已停止"
+    return 0
+}
+
+tun_state() {
+    # optun 虚拟网卡是否已建立 (系统级虚拟网卡已上线)
+    if [ -d /sys/class/net/optun ]; then
+        echo "up"
+    else
+        echo "down"
+    fi
+}
+
+tun_addr() {
+    # optun 是点对点网卡: "inet <本地IP> peer <对端IP>/32 scope global optun"
+    # 本地 IP 不带掩码, 所以不能用 'inet X/Y' 去匹配。多级回退: ip 命令 → 运行日志。
+    local a="" ipbin
+    ipbin=$(command -v ip 2>/dev/null); [ -z "$ipbin" ] && ipbin="/system/bin/ip"
+    a=$("$ipbin" -4 addr show optun 2>/dev/null \
+        | grep -oE 'inet [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
+        | head -1 | sed -E 's/^inet //; s#/[0-9]+##')
+    if [ -z "$a" ]; then
+        # 从运行日志解析虚拟 IP: "sdwan init: start tun 10.9.0.2/24"
+        a=$(grep -m1 -oE 'start tun [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+' \
+            "${DATA_DIR}/log/openp2p.log" "${MODDIR}/log/openp2p.log" 2>/dev/null \
+            | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    fi
+    echo "$a"
+}
+
+cmd_status() {
+    local running=0 pid=""
+    is_running && running=1 && pid=$(get_pid)
+    local token=$(get_token)
+    local token_ok=0
+    [ -n "$token" ] && [ "$token" != "YOUR_TOKEN_HERE" ] && token_ok=1
+    local node=$(get_node_name)
+    local tun=$(tun_state)
+    local addr=$(tun_addr)
+    local ver=$(get_version)
+
+    if [ "$HUMAN" = 1 ]; then
+        echo "状态: $([ "$running" = 1 ] && echo 运行中 || echo 已停止)"
+        echo "PID: ${pid:-无}"
+        echo "Token: $([ "$token_ok" = 1 ] && echo 已配置 || echo 未配置)"
+        echo "节点名: $node"
+        echo "版本: $ver"
+        echo "虚拟网卡(optun): $([ "$tun" = "up" ] && echo "已上线 $addr" || echo 未建立)"
+        return 0
+    fi
+
+    local running_bool="false" token_bool="false"
+    [ "$running" = 1 ] && running_bool="true"
+    [ "$token_ok" = 1 ] && token_bool="true"
+
+    printf '{"running":%s,"pid":%s,"token_configured":%s,"node":"%s","version":"%s","tun":"%s","tun_addr":"%s"}\n' \
+        "$running_bool" "${pid:-0}" "$token_bool" "$(json_escape "$node")" "$(json_escape "$ver")" "$tun" "$(json_escape "$addr")"
+}
+
+cmd_config_get() {
+    if [ -f "$CONFIG_FILE" ]; then cat "$CONFIG_FILE"; else cat "$DEFAULT_CONFIG" 2>/dev/null || echo '{}'; fi
+}
+
+cmd_config_import() {
+    # base64 解码后校验含 '{' 再写入
+    local b64="$1"
+    [ -z "$b64" ] && { [ "$HUMAN" = 1 ] && echo "缺少 base64 参数"; return 1; }
+    local decoded
+    decoded=$(printf '%s' "$b64" | base64 -d 2>/dev/null)
+    if [ -z "$decoded" ]; then
+        # toybox base64 可能是 busybox base64 -d
+        decoded=$(printf '%s' "$b64" | busybox base64 -d 2>/dev/null)
+    fi
+    if [ -z "$decoded" ] || ! printf '%s' "$decoded" | grep -q '{'; then
+        [ "$HUMAN" = 1 ] && echo "无效的 JSON"
+        return 1
+    fi
+    mkdir -p "$(dirname "$CONFIG_FILE")" 2>/dev/null
+    printf '%s\n' "$decoded" > "$CONFIG_FILE"
+    [ "$HUMAN" = 1 ] && echo "配置已保存"
+    return 0
+}
+
+cmd_log() {
+    local n="${1:-50}"
+    case "$n" in *[!0-9]*) n=50 ;; esac
+    if [ -f "$RUN_LOG" ]; then tail -n "$n" "$RUN_LOG"; else echo "(无日志)"; fi
+}
+
+cmd_tun() {
+    local tun=$(tun_state)
+    local addr=$(tun_addr)
+    local fwd=$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)
+    if [ "$HUMAN" = 1 ]; then
+        echo "optun: $tun"
+        [ "$tun" = "up" ] && echo "地址: $addr"
+        echo "ip_forward: ${fwd:-?}"
+        ip -4 route show 2>/dev/null | grep -i optun
+        return 0
+    fi
+    printf '{"optun":"%s","addr":"%s","ip_forward":"%s"}\n' "$tun" "$(json_escape "$addr")" "${fwd:-0}"
+}
+
+cmd_version() {
+    get_version
+}
+
+# 诊断: 输出完整网络/路由/进程/日志状态 (排查跨设备连通性与显示问题)
+cmd_diag() {
+    local ipbin gp
+    ipbin=$(command -v ip 2>/dev/null); [ -z "$ipbin" ] && ipbin="/system/bin/ip"
+    gp=$(command -v getprop 2>/dev/null); [ -z "$gp" ] && gp="/system/bin/getprop"
+
+    echo "=== 基础探测 ==="
+    echo "version: '$(get_version)'"
+    echo "node: '$(get_node_name)'"
+    echo "tun_addr: '$(tun_addr)'"
+    echo "tun_state: $(tun_state)"
+    echo "ip 路径: ${ipbin}"
+    echo "getprop 路径: ${gp}"
+    echo "brand='$("$gp" ro.product.brand 2>/dev/null)' model='$("$gp" ro.product.model 2>/dev/null)'"
+    echo ""
+    echo "=== optun 网卡 ==="
+    "$ipbin" addr show optun 2>/dev/null || echo "(无 optun)"
+    echo ""
+    echo "=== 主路由表 (含 optun 路由) ==="
+    "$ipbin" route show 2>/dev/null | grep -iE 'optun|default' || "$ipbin" route show 2>/dev/null || echo "(无路由)"
+    echo ""
+    echo "=== local_network 表 (table 97, Android 默认查表) ==="
+    "$ipbin" route show table local_network 2>/dev/null || "$ipbin" route show table 97 2>/dev/null || echo "(无 local_network 表)"
+    echo ""
+    echo "=== table 100 (openp2pctl 子网路由) ==="
+    "$ipbin" route show table 100 2>/dev/null || echo "(无 table 100)"
+    echo ""
+    echo "=== 路由策略 (ip rule) ==="
+    "$ipbin" rule show 2>/dev/null || echo "(无 rule)"
+    echo ""
+    echo "=== 内核实际选路 (testip 供手动 ip route get 参考) ==="
+    local testip
+    testip=$(tun_addr | sed -E 's/\.[0-9]+$/.17/')
+    if [ -n "$testip" ]; then
+        echo "testip=$testip"
+        "$ipbin" route get "$testip" 2>/dev/null || echo "(无法查询)"
+    else
+        echo "(optun 未就绪, 跳过)"
+    fi
+    echo ""
+    echo "=== ip_forward ==="
+    echo "ip_forward=$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)"
+    echo ""
+    echo "=== iptables filter FORWARD ==="
+    iptables -t filter -L FORWARD -n 2>/dev/null || echo "(iptables 不可用)"
+    echo ""
+    echo "=== iptables nat POSTROUTING ==="
+    iptables -t nat -L POSTROUTING -n 2>/dev/null || echo "(iptables 不可用)"
+    echo ""
+    echo "=== 进程 ==="
+    echo "openp2p pid: $(get_pid)"
+    echo "core 守护循环: $(is_core_running && echo running || echo stopped)"
+    echo ""
+    echo "=== 到服务器的连接 (诊断断连) ==="
+    local srvhost srvip
+    srvhost=$(json_get "ServerHost" "api.openp2p.cn" "str")
+    srvip=$(json_get "ServerIP" "" "str")
+    [ -z "$srvip" ] && srvip=$(getent hosts "$srvhost" 2>/dev/null | awk 'NR==1 { print $1 }')
+    echo "serverhost=$srvhost serverip=$srvip"
+    "$ipbin" route get "$srvip" 2>/dev/null || echo "(无法查询到服务器的选路)"
+    if command -v ss >/dev/null 2>&1; then
+        ss -tnp 2>/dev/null | grep -E ':27183|openp2p' || echo "(无到 27183 的连接)"
+    else
+        awk 'NR>1 && $3 ~ /6A1F$/ { print "tcp state=" $4 " local=" $2 " remote=" $3 }' /proc/net/tcp 2>/dev/null
+    fi
+    echo ""
+    echo "=== SDWAN 日志 (最近) ==="
+    grep -hoE 'sdwan init[^ ]*:.*' "${DATA_DIR}/log/openp2p.log" "${MODDIR}/log/openp2p.log" 2>/dev/null | tail -8
+    return 0
+}
+
+# 修复跨设备连通性: 确保 ip_forward + optun 子网路由 + FORWARD/SNAT 规则
+# 全部为运行时操作, 重启后自动恢复 (不修改任何系统文件)
+cmd_netfix() {
+    ensure_tun_node
+
+    local ipbin peer subnet
+    ipbin=$(command -v ip 2>/dev/null); [ -z "$ipbin" ] && ipbin="/system/bin/ip"
+
+    # 1. optun 对端 IP (即虚拟网络网关) = "peer X/32"
+    peer=$("$ipbin" -4 addr show optun 2>/dev/null \
+        | grep -oE 'peer [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
+        | head -1 | sed -E 's/peer //')
+    if [ -z "$peer" ]; then
+        [ "$HUMAN" = 1 ] && echo "错误: 未检测到 optun 网卡/对端地址, 请先启动服务"
+        return 1
+    fi
+
+    # 2. 子网网络地址: 日志 gateway 字段形如 "10.9.0.254/24"(网关IP+掩码), 必须规范化为
+    #    网络地址 "10.9.0.0/24"; 否则 ip route/rule 会因主机位非零而失败 (之前的 bug)。
+    #    含轮转日志 *.log.0 (openp2p checkFile 会在超限时轮转, gateway 行可能已被轮走)。
+    subnet=$(grep -m1 -hoE '"gateway"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+"' \
+        "${DATA_DIR}/log/openp2p.log" "${DATA_DIR}/log/openp2p.log".* \
+        "${MODDIR}/log/openp2p.log" "${MODDIR}/log/openp2p.log".* 2>/dev/null \
+        | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+')
+    if [ -z "$subnet" ]; then
+        subnet=$(grep -m1 -hoE 'start tun [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+' \
+            "${DATA_DIR}/log/openp2p.log" "${DATA_DIR}/log/openp2p.log".* \
+            "${MODDIR}/log/openp2p.log" "${MODDIR}/log/openp2p.log".* 2>/dev/null \
+            | head -1 | awk '{print $3}')
+    fi
+    subnet=$(normalize_cidr "$subnet")
+    if [ -z "$subnet" ]; then
+        subnet=$(normalize_cidr "$peer/24")
+    fi
+
+    # 3. 子网路由: 点对点接口 optun 用 "dev optun" 即可(peer 即下一跳, 无需 via)。
+    #    关键点: Android 无 "lookup main" 规则, 未打标流量实际走 wlan0/rmnet_data* 等
+    #    per-network 表(见 ip route get 输出), 而非 main/local_network。所以把路由放进
+    #    一个 netd 不管理的独立表 100, 再加一条高优先级 "to <子网> lookup 100" 规则——
+    #    只劫持虚拟子网流量, 不影响其它网络。全部为内存态, 重启即恢复。
+    if "$ipbin" route show table 100 2>/dev/null | grep -qF "$subnet"; then
+        [ "$HUMAN" = 1 ] && echo "路由已存在 (table 100): $subnet dev optun"
+    else
+        if "$ipbin" route add "$subnet" dev optun table 100 2>/dev/null; then
+            [ "$HUMAN" = 1 ] && echo "已添加路由 (table 100): $subnet dev optun"
+        else
+            [ "$HUMAN" = 1 ] && echo "警告: 添加 table 100 路由失败"
+        fi
+    fi
+    if "$ipbin" rule show 2>/dev/null | grep -qF "$subnet"; then
+        [ "$HUMAN" = 1 ] && echo "策略路由已存在: to $subnet lookup 100"
+    else
+        if "$ipbin" rule add to "$subnet" lookup 100 pref 100 2>/dev/null; then
+            [ "$HUMAN" = 1 ] && echo "已添加策略路由: to $subnet lookup 100 (pref 100)"
+        else
+            [ "$HUMAN" = 1 ] && echo "警告: 添加策略路由失败"
+        fi
+    fi
+
+    # 4. 确保 FORWARD 规则 (openp2p 用 allowTunForward)
+    iptables -t filter -C FORWARD -i optun -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i optun -j ACCEPT 2>/dev/null
+    iptables -t filter -C FORWARD -o optun -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -o optun -j ACCEPT 2>/dev/null
+    [ "$HUMAN" = 1 ] && echo "FORWARD 规则已确保"
+
+    # 5. 确保 SNAT 链 (openp2p 用 initSNATRule, OPSDWAN 链)
+    if iptables -t nat -L OPSDWAN -n 2>/dev/null | grep -q MASQUERADE; then
+        [ "$HUMAN" = 1 ] && echo "SNAT 链已存在"
+    else
+        iptables -t nat -D POSTROUTING -j OPSDWAN 2>/dev/null
+        iptables -t nat -F OPSDWAN 2>/dev/null
+        iptables -t nat -X OPSDWAN 2>/dev/null
+        iptables -t nat -N OPSDWAN 2>/dev/null
+        iptables -t nat -A POSTROUTING -j OPSDWAN 2>/dev/null
+        iptables -t nat -A OPSDWAN -o optun ! -s "$subnet" -j MASQUERADE 2>/dev/null
+        iptables -t nat -A OPSDWAN ! -o optun -s "$subnet" -j MASQUERADE 2>/dev/null
+        [ "$HUMAN" = 1 ] && echo "SNAT 链已重建 (subnet=$subnet)"
+    fi
+
+    [ "$HUMAN" = 1 ] && echo "完成: 子网=$subnet 网关=$peer ip_forward=$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)"
+    return 0
+}
+
+# 固定 openp2p 到服务器的连接走物理接口 (诊断 "unexpected EOF" 断连问题)
+# 原理: openp2p 用 net.Dialer 建 WebSocket 时未打 SO_MARK (p2pnetwork.go 只设 Timeout),
+# 所以 socket 走 Android 默认网络 (per-network 表), 逻辑网络切换/后台节流时 netd 会销毁
+# 该 socket。这里把"到服务器 IP"的流量用独立表 100 + 高优先级规则 (pref 50) 直接钉到
+# 物理接口, 绕过 per-network 查表。全部运行时操作, 重启自动恢复; 每次运行按当前实际
+# 选路重刷 (网络切换后 iface/gw 变化能自纠偏)。
+cmd_netpin() {
+    local ipbin host ip route gw iface
+    ipbin=$(command -v ip 2>/dev/null); [ -z "$ipbin" ] && ipbin="/system/bin/ip"
+
+    # 1. 服务器地址: 优先 config 的 ServerIP, 否则解析 ServerHost
+    host=$(json_get "ServerHost" "api.openp2p.cn" "str")
+    ip=$(json_get "ServerIP" "" "str")
+    if [ -z "$ip" ]; then
+        ip=$(getent hosts "$host" 2>/dev/null | awk 'NR==1 { print $1 }')
+        [ -z "$ip" ] && ip=$(nslookup "$host" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | tail -1)
+    fi
+    if ! echo "$ip" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+        [ "$HUMAN" = 1 ] && echo "错误: 无法解析服务器 IP (host=$host ip=$ip)"
+        return 1
+    fi
+
+    # 2. 物理默认接口 + 网关: 用未钉目标的 8.8.8.8 探测 (避免被上次的钉路由干扰)
+    route=$("$ipbin" route get 8.8.8.8 2>/dev/null)
+    [ -z "$(echo "$route" | grep -oE 'dev [a-zA-Z0-9_]+')" ] && route=$("$ipbin" route get "$ip" 2>/dev/null)
+    gw=$(echo "$route" | grep -oE 'via [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $2}')
+    iface=$(echo "$route" | grep -oE 'dev [a-zA-Z0-9_]+' | head -1 | awk '{print $2}')
+    if [ -z "$iface" ]; then
+        [ "$HUMAN" = 1 ] && echo "错误: 无法确定物理接口 (ip route get 无 dev)"
+        return 1
+    fi
+
+    # 3. 删除旧钉路由后重加 (网络切换后自纠偏)
+    "$ipbin" route del "$ip/32" table 100 2>/dev/null
+    if "$ipbin" route add "$ip/32" ${gw:+via "$gw"} dev "$iface" table 100 2>/dev/null; then
+        [ "$HUMAN" = 1 ] && echo "已添加路由 (table 100): $ip/32 ${gw:+via $gw }dev $iface"
+    else
+        [ "$HUMAN" = 1 ] && echo "警告: 添加 table 100 路由失败"
+    fi
+    "$ipbin" rule del to "$ip/32" lookup 100 pref 50 2>/dev/null
+    if "$ipbin" rule add to "$ip/32" lookup 100 pref 50 2>/dev/null; then
+        [ "$HUMAN" = 1 ] && echo "已添加策略路由: to $ip/32 lookup 100 (pref 50)"
+    else
+        [ "$HUMAN" = 1 ] && echo "警告: 添加策略路由失败"
+    fi
+
+    [ "$HUMAN" = 1 ] && echo "完成: 服务器 $ip 已固定到 $iface (table 100, pref 50), 重启自动恢复"
+    return 0
+}
+
+# 撤销 netpin 的钉路由 (恢复服务器流量走 Android 默认网络)
+cmd_netunpin() {
+    local ipbin host ip
+    ipbin=$(command -v ip 2>/dev/null); [ -z "$ipbin" ] && ipbin="/system/bin/ip"
+    host=$(json_get "ServerHost" "api.openp2p.cn" "str")
+    ip=$(json_get "ServerIP" "" "str")
+    [ -z "$ip" ] && ip=$(getent hosts "$host" 2>/dev/null | awk 'NR==1 { print $1 }')
+    "$ipbin" route del "$ip/32" table 100 2>/dev/null
+    "$ipbin" rule del to "$ip/32" lookup 100 2>/dev/null
+    [ "$HUMAN" = 1 ] && echo "已撤销 netpin 钉路由 (to $ip/32 lookup 100), 服务器流量恢复走默认网络"
+    return 0
+}
+
+# ===== 更新 openp2p 核心 (异步) =====
+# WebUI 调用 update → 立即返回 {started:true}, 后台 worker 把进度 JSON 写入 UPDATE_STATE;
+# WebUI 轮询 update-status 读取进度 (stage: checking/downloading/restarting/done)。
+# 终端 (--human) 走同步路径直接调用 fetch-openp2p.sh。
+
+# 后台更新 worker: 每阶段把进度 JSON 写入 UPDATE_STATE
+__update_worker() {
+    local ver="$1" cur latest rc log msg newver
+    cur=$(get_version)
+    printf '{"running":true,"stage":"checking","current":"%s"}\n' "$(json_escape "$cur")" > "$UPDATE_STATE"
+
+    # 1. 仅下载并读取最新版本号 (--check 不替换不重启)
+    if [ -n "$ver" ]; then
+        latest=$("${MODDIR}/fetch-openp2p.sh" --ver "$ver" --check 2>/dev/null)
+    else
+        latest=$("${MODDIR}/fetch-openp2p.sh" --check 2>/dev/null)
+    fi
+    rc=$?
+    latest="${latest#latest=}"
+
+    # 2. 已是最新则跳过
+    if [ $rc -eq 0 ] && [ -n "$latest" ] && [ -n "$cur" ] && [ "$latest" = "$cur" ]; then
+        printf '{"running":false,"done":true,"ok":true,"up_to_date":true,"current":"%s","new":"%s","message":"已是最新版本"}\n' \
+            "$(json_escape "$cur")" "$(json_escape "$latest")" > "$UPDATE_STATE"
+        return 0
+    fi
+
+    # 3. 下载+备份+替换 (不重启)
+    printf '{"running":true,"stage":"downloading","current":"%s","new":"%s"}\n' \
+        "$(json_escape "$cur")" "$(json_escape "$latest")" > "$UPDATE_STATE"
+    if [ -n "$ver" ]; then
+        log=$("${MODDIR}/fetch-openp2p.sh" --ver "$ver" --no-restart 2>&1)
+    else
+        log=$("${MODDIR}/fetch-openp2p.sh" --no-restart 2>&1)
+    fi
+    rc=$?
+    msg=$(printf '%s' "$log" | tr '\n' ' ' | tr -s ' ')
+
+    if [ $rc -ne 0 ]; then
+        printf '{"running":false,"done":true,"ok":false,"current":"%s","message":"%s"}\n' \
+            "$(json_escape "$cur")" "$(json_escape "$msg")" > "$UPDATE_STATE"
+        return 1
+    fi
+
+    # 4. 重启服务
+    printf '{"running":true,"stage":"restarting","current":"%s","new":"%s"}\n' \
+        "$(json_escape "$cur")" "$(json_escape "$latest")" > "$UPDATE_STATE"
+
+    newver=$(cd "$MODDIR" 2>/dev/null && "${OPENP2P}" -v 2>/dev/null | head -1)
+    if [ -z "$newver" ]; then
+        newver=$(grep -aoE '3\.[0-9]+\.[0-9]+' "${OPENP2P}" 2>/dev/null \
+            | awk -F'[.]' '{ k = $2*1000 + $3; if (k > m) { m = k; b = $0 } } END { print b }')
+    fi
+    [ -z "$newver" ] && newver="${latest:-未知}"
+
+    do_start >/dev/null 2>&1
+
+    printf '{"running":false,"done":true,"ok":true,"up_to_date":false,"current":"%s","new":"%s","message":"更新成功"}\n' \
+        "$(json_escape "$cur")" "$(json_escape "$newver")" > "$UPDATE_STATE"
+    return 0
+}
+
+# 更新入口: WebUI (JSON) 异步启动后台 worker; 终端 (--human) 同步执行
+cmd_update() {
+    local ver="$1"
+    if [ "$HUMAN" = 1 ]; then
+        if [ -n "$ver" ]; then
+            "${MODDIR}/fetch-openp2p.sh" --ver "$ver" --no-restart 2>&1
+        else
+            "${MODDIR}/fetch-openp2p.sh" --no-restart 2>&1
+        fi
+        return $?
+    fi
+    rm -f "$UPDATE_STATE" 2>/dev/null
+    nohup "${MODDIR}/openp2pctl" __update_worker "$ver" >/dev/null 2>&1 &
+    printf '{"started":true}\n'
+}
+
+# 读取后台更新进度 (WebUI 轮询)
+cmd_update_status() {
+    if [ -f "$UPDATE_STATE" ]; then
+        cat "$UPDATE_STATE" 2>/dev/null
+    else
+        printf '{"running":false,"done":false}\n'
+    fi
+}
+
+main() {
+    local sub="$1"; shift 2>/dev/null
+    case "$sub" in
+        status)  cmd_status ;;
+        start)   do_start ;;
+        stop)    do_stop ;;
+        restart) do_stop; do_start ;;
+        toggle)  is_running && do_stop || do_start ;;
+        config)
+            case "$1" in
+                get) cmd_config_get ;;
+                import) cmd_config_import "$2" ;;
+                path) echo "$CONFIG_FILE" ;;
+                *) [ "$HUMAN" = 1 ] && echo "用法: config get|import <base64>|path" ;;
+            esac ;;
+        log)   cmd_log "$1" ;;
+        tun)   cmd_tun ;;
+        version) cmd_version ;;
+        diag)  cmd_diag ;;
+        netfix) cmd_netfix ;;
+        netpin) cmd_netpin ;;
+        netunpin) cmd_netunpin ;;
+        update) cmd_update "$1" ;;
+        update-status) cmd_update_status ;;
+        __update_worker) __update_worker "$1" ;;
+        *)
+            [ "$HUMAN" = 1 ] && echo "用法: openp2pctl <status|start|stop|restart|toggle|config|log|tun|version|diag|netfix|netpin|update>" ;;
+    esac
+}
+
+main "$@"

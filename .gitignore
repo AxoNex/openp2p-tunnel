@@ -1,0 +1,13 @@
+node_modules/
+# webroot 是 vite 构建产物目录, 但 icon.svg 是源资源需纳入版本库
+webroot/*
+!webroot/icon.svg
+openp2p
+openp2p.bak
+*.zip
+.tmp/
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
