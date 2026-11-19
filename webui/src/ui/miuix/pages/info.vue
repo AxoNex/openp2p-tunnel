@@ -9,14 +9,14 @@ import {
   MiuixText,
   MiuixArrowPreference,
 } from "miuix-vue";
-import { api } from "../../lib/api";
+import { api } from "../../../lib/api";
 import {
   MODULE_NAME,
   MODULE_AUTHOR,
   MODULE_LICENSE,
   MODULE_ID,
   REPOSITORY_URL,
-} from "../../lib/constants";
+} from "../../../lib/constants";
 
 const { t } = useI18n();
 

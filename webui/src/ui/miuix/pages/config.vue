@@ -16,9 +16,9 @@ import {
   MiuixDialog,
 } from "miuix-vue";
 import { Refresh, Settings } from "miuix-vue/icons";
-import { api } from "../../lib/api";
-import { uiStore } from "../../lib/stores/uiStore";
-import type { AppConfig, UpdateResult, UiStyle } from "../../lib/types";
+import { api } from "../../../lib/api";
+import { uiStore } from "../../../lib/stores/uiStore";
+import type { AppConfig, UpdateResult, UiStyle } from "../../../lib/types";
 
 const { t } = useI18n();
 

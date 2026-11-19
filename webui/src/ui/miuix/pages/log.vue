@@ -3,7 +3,7 @@
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { MiuixCard, MiuixSmallTitle, MiuixButton } from "miuix-vue";
-import { api } from "../../lib/api";
+import { api } from "../../../lib/api";
 
 const { t } = useI18n();
 

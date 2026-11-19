@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { api } from "../../lib/api";
+import { api } from "../../../lib/api";
 import { ICONS } from "../icons";
 import {
   MODULE_NAME,
@@ -10,7 +10,7 @@ import {
   MODULE_LICENSE,
   MODULE_ID,
   REPOSITORY_URL,
-} from "../../lib/constants";
+} from "../../../lib/constants";
 
 const { t } = useI18n();
 

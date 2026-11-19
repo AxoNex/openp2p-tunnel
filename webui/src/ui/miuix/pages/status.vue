@@ -14,9 +14,9 @@ import {
 } from "miuix-vue";
 import { Refresh, Settings } from "miuix-vue/icons";
 import StatusCard from "../components/StatusCard.vue";
-import { api } from "../../lib/api";
-import { uiStore } from "../../lib/stores/uiStore";
-import type { ServiceStatus, TunStatus } from "../../lib/types";
+import { api } from "../../../lib/api";
+import { uiStore } from "../../../lib/stores/uiStore";
+import type { ServiceStatus, TunStatus } from "../../../lib/types";
 
 const { t } = useI18n();
 

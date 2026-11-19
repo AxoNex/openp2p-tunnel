@@ -2,10 +2,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { api } from "../../lib/api";
-import { uiStore } from "../../lib/stores/uiStore";
+import { api } from "../../../lib/api";
+import { uiStore } from "../../../lib/stores/uiStore";
 import { ICONS } from "../icons";
-import type { AppConfig, UpdateResult, UiStyle } from "../../lib/types";
+import type { AppConfig, UpdateResult, UiStyle } from "../../../lib/types";
 
 const { t } = useI18n();
 
