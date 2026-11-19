@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+
+      - name: 设置 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: webui/pnpm-lock.yaml
+
+      - name: 校验 tag 与 module.prop 版本一致
+        run: |
+          VERSION=$(grep '^version=' module.prop | cut -d= -f2)
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$VERSION" != "$TAG" ]; then
+            echo "::error::tag v${TAG} 与 module.prop version=${VERSION} 不一致，请先同步版本号再打 tag"
+            exit 1
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: 构建并打包 (release)
+        run: sh build.sh --fetch-binary
+
+      - name: 发布 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" "openp2p-tunnel-${VERSION}.zip" \
+            --title "v${VERSION}" \
+            --generate-notes
