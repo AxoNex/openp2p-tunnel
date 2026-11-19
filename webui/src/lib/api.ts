@@ -65,6 +65,9 @@ export const api = {
   getTun: async (): Promise<TunStatus> => JSON.parse(await run("tun")),
   getConfig: async (): Promise<AppConfig> => JSON.parse(await run("config", ["get"])),
   getLog: async (lines = 100): Promise<string> => run("log", [String(lines)]),
+  clearLog: async (): Promise<void> => {
+    await run("log", ["--clear"]);
+  },
 
   start: async () => run("start"),
   stop: async () => run("stop"),

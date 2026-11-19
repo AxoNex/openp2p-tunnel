@@ -28,11 +28,11 @@
 1. 用 KernelSU 管理器安装从上方「下载」获取的 zip（正式版或 canary）。
 2. 获取 OpenP2P 控制台的 Token，填入配置（三种方式任选其一）：
    - **WebUI**：打开模块的「配置」页填写 Token，保存后重启服务。
-   - **配置文件**：编辑模块目录的 `/data/adb/modules/openp2p-tunnel/config/config.json` 的 `network.Token`。
+   - **配置文件**：编辑 `/data/adb/openp2p-tunnel/config.json` 的 `network.Token`。
    - **命令行**：`su -c "/data/adb/modules/openp2p-tunnel/openp2pctl config import <base64>"`。
 3. 回到「状态」页点击「启动」。
 
-配置直接存储于模块目录的 `config/config.json`（卸载或更新模块会一并清除，请自行备份 Token）。
+配置独立存储于 `/data/adb/openp2p-tunnel/config.json`（模块更新不会清除；卸载时由 `uninstall.sh` 一并清理）。
 
 ## 虚拟网络（SDWAN）接入
 
@@ -209,6 +209,7 @@ openp2p-tunnel/
 | `LogLevel` | 日志级别 | `1` |
 | `MonitorInterval` | 守护检查间隔 | `10s` |
 | `Timezone` | 时区 | `Asia/Shanghai` |
+| `AutoClearLog` | 服务启动时自动清空日志 | `false` |
 
 ## 关于
 

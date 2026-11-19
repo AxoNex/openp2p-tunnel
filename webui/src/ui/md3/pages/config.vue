@@ -58,6 +58,12 @@ const timezone = computed({
     if (config.value) config.value.Timezone = v;
   },
 });
+const autoClearLog = computed({
+  get: () => config.value?.AutoClearLog ?? false,
+  set: (v: boolean) => {
+    if (config.value) config.value.AutoClearLog = v;
+  },
+});
 
 function eventValue(event: Event): string {
   return String((event.target as HTMLInputElement).value ?? "");
@@ -251,6 +257,14 @@ onMounted(() => {
         <md-switch :selected="insecure" @change="insecure = eventSelected($event)" />
       </div>
       <hr class="md3-divider" />
+      <div class="md3-row">
+        <div class="copy"><strong>{{ t("config.autoClearLog") }}</strong></div>
+        <md-switch
+          :selected="autoClearLog"
+          @change="autoClearLog = eventSelected($event)"
+        />
+      </div>
+      <hr class="md3-divider" />
       <md-outlined-text-field
         class="field"
         :label="t('config.timezone')"
@@ -296,8 +310,8 @@ onMounted(() => {
 
     <p class="md3-section-title">{{ t("config.settings") }}</p>
     <div class="md3-card">
-      <div class="md3-row">
-        <div class="copy"><strong>{{ t("common.language") }}</strong></div>
+      <div class="md3-field">
+        <label class="md3-field-label">{{ t("common.language") }}</label>
         <select v-model="langCode" class="md3-select" @change="onLangChange">
           <option
             v-for="l in uiStore.availableLanguages"
@@ -308,9 +322,8 @@ onMounted(() => {
           </option>
         </select>
       </div>
-      <hr class="md3-divider" />
-      <div class="md3-row">
-        <div class="copy"><strong>{{ t("common.uiStyle") }}</strong></div>
+      <div class="md3-field">
+        <label class="md3-field-label">{{ t("common.uiStyle") }}</label>
         <select v-model="styleCode" class="md3-select" @change="onStyleChange">
           <option value="miuix">{{ t("common.miuixStyle") }}</option>
           <option value="md3">{{ t("common.md3Style") }}</option>
@@ -357,5 +370,21 @@ onMounted(() => {
   width: 100%;
   display: block;
   margin-bottom: 12px;
+}
+
+.md3-field {
+  margin-bottom: 12px;
+}
+
+.md3-field-label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.md3-select {
+  width: 100%;
 }
 </style>

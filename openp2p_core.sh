@@ -5,9 +5,10 @@
 
 MODDIR=${0%/*}
 MODID=$(basename "$MODDIR")
-DATA_DIR="${MODDIR}"
-CONFIG_FILE="${DATA_DIR}/config/config.json"
-LOG_DIR="${DATA_DIR}/log"
+# 配置独立存放, 模块更新/重刷不会重置 (卸载时由 uninstall.sh 一并清理)
+CONFIG_DIR="/data/adb/openp2p-tunnel"
+CONFIG_FILE="${CONFIG_DIR}/config.json"
+LOG_DIR="${MODDIR}/log"
 LOG_FILE="${LOG_DIR}/openp2p_core.log"
 MODULE_PROP="${MODDIR}/module.prop"
 OPENP2P="${MODDIR}/openp2p"
@@ -21,7 +22,7 @@ DEFAULT_INSECURE=false
 DEFAULT_TZ="Asia/Shanghai"
 
 mkdir -p "${LOG_DIR}" 2>/dev/null
-mkdir -p "${DATA_DIR}/config" 2>/dev/null
+mkdir -p "${CONFIG_DIR}" 2>/dev/null
 touch "${LOG_FILE}" 2>/dev/null
 
 log() {
@@ -185,6 +186,7 @@ while true; do
             INSECURE_VAL=$(json_get "TLSInsecureSkipVerify" "$DEFAULT_INSECURE" "bool")
             TZ_VAL=$(json_get "Timezone" "$DEFAULT_TZ" "str")
             NODE_NAME=$(json_get "Node" "" "str")
+            AUTO_CLEAR_LOG=$(json_get "AutoClearLog" "false" "bool")
             [ -n "$NODE_NAME" ] && DEVICE_NAME="$NODE_NAME"
 
             if ! pgrep -x openp2p >/dev/null 2>&1; then
@@ -197,6 +199,13 @@ while true; do
                 # 构造额外参数 (TLS 跳过校验仅按用户配置, 不再自动附加)
                 EXTRA_ARGS=""
                 [ "$INSECURE_VAL" = "true" ] && EXTRA_ARGS="$EXTRA_ARGS -insecure"
+
+                # 启动时自动清除一次日志 (用户可选, 存于 config.AutoClearLog)
+                if [ "$AUTO_CLEAR_LOG" = "true" ]; then
+                    : > "${MODDIR}/log/openp2p.log" 2>/dev/null
+                    : > "${LOG_DIR}/openp2p_console.log" 2>/dev/null
+                    log "启动时自动清除日志"
+                fi
 
                 log "Starting OpenP2P with token: ${TOKEN:0:8}..."
                 log "  server=${SERVER_HOST} loglevel=${LOG_LEVEL} sharebandwidth=${SHARE_BANDWIDTH} tz=${TZ_VAL}"
@@ -245,7 +254,7 @@ while true; do
             if pgrep -x openp2p >/dev/null 2>&1; then
                 _login_n=$(grep -n "login ok" "${MODDIR}/log/openp2p.log" 2>/dev/null | tail -1 | cut -d: -f1)
                 _err_n=$(grep -nE "ReadMessage error|keepAlive error" "${MODDIR}/log/openp2p.log" 2>/dev/null | tail -1 | cut -d: -f1)
-                _down_file="${DATA_DIR}/.conn_down"
+                _down_file="${MODDIR}/.conn_down"
                 if [ -n "$_err_n" ] && { [ -z "$_login_n" ] || [ "$_err_n" -gt "$_login_n" ]; }; then
                     if [ ! -f "$_down_file" ]; then
                         date +%s > "$_down_file" 2>/dev/null

@@ -15,5 +15,6 @@
   "TLSInsecureSkipVerify": false,
   "Forcev6": false,
   "MonitorInterval": "10s",
-  "Timezone": "Asia/Shanghai"
+  "Timezone": "Asia/Shanghai",
+  "AutoClearLog": false
 }

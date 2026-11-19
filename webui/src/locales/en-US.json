@@ -84,13 +84,16 @@
     "updateTimeout": "Update timed out. Run \"openp2pctl update --human\" in a terminal for details.",
     "upToDateSnack": "Already up to date",
     "updatedSnack": "Core updated to {version}",
-    "monetTheme": "Enable Monet colors"
+    "monetTheme": "Enable Monet colors",
+    "autoClearLog": "Clear log once when the service starts"
   },
   "log": {
     "title": "Runtime Log",
     "loading": "Loading log…",
     "empty": "(no log)",
-    "loadFailed": "Failed to load: {message}"
+    "loadFailed": "Failed to load: {message}",
+    "clear": "Clear log",
+    "cleared": "Log cleared"
   },
   "info": {
     "title": "About",

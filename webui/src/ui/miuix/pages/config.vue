@@ -72,6 +72,12 @@ const timezone = computed({
     if (config.value) config.value.Timezone = v;
   },
 });
+const autoClearLog = computed({
+  get: () => config.value?.AutoClearLog ?? false,
+  set: (v: boolean) => {
+    if (config.value) config.value.AutoClearLog = v;
+  },
+});
 
 async function load(): Promise<void> {
   try {
@@ -264,6 +270,11 @@ onMounted(() => {
       <MiuixBasicComponent :title="t('config.skipTls')">
         <template #end>
           <MiuixSwitch v-model="insecure" />
+        </template>
+      </MiuixBasicComponent>
+      <MiuixBasicComponent :title="t('config.autoClearLog')">
+        <template #end>
+          <MiuixSwitch v-model="autoClearLog" />
         </template>
       </MiuixBasicComponent>
       <MiuixBasicComponent :title="t('config.timezone')">

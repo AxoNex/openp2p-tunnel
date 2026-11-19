@@ -4,8 +4,7 @@
 
 MODDIR=${0%/*}
 MODID=$(basename "$MODDIR")
-DATA_DIR="${MODDIR}"
-LOG_DIR="${DATA_DIR}/log"
+LOG_DIR="${MODDIR}/log"
 LOG_FILE="${LOG_DIR}/service.log"
 
 mkdir -p "${LOG_DIR}" 2>/dev/null

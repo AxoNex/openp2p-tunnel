@@ -25,6 +25,12 @@ const tun = ref<TunStatus | null>(null);
 const busy = ref(false);
 const busyLabel = ref("");
 
+const ingLabel = {
+  start: "status.starting",
+  stop: "status.stopping",
+  restart: "status.restarting",
+} as const;
+
 const statusKind = computed<"checking" | "normal" | "abnormal">(() => {
   if (!status.value) return "checking";
   return status.value.running ? "normal" : "abnormal";
@@ -65,7 +71,7 @@ async function run(
   expectRunning: boolean,
 ): Promise<void> {
   busy.value = true;
-  busyLabel.value = t(`status.${action}ing`);
+  busyLabel.value = t(ingLabel[action]);
   try {
     await fn();
     // 命令已异步返回, 轮询状态直到到位 (转圈 + 实时更新卡片, 不阻塞 UI)

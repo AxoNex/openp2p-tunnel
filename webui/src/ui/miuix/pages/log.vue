@@ -4,11 +4,13 @@ import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { MiuixCard, MiuixSmallTitle, MiuixButton } from "miuix-vue";
 import { api } from "../../../lib/api";
+import { uiStore } from "../../../lib/stores/uiStore";
 
 const { t } = useI18n();
 
 const log = ref(t("log.loading"));
 const loading = ref(false);
+const clearing = ref(false);
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -18,6 +20,19 @@ async function load(): Promise<void> {
     log.value = t("log.loadFailed", { message: (e as Error).message });
   } finally {
     loading.value = false;
+  }
+}
+
+async function clear(): Promise<void> {
+  clearing.value = true;
+  try {
+    await api.clearLog();
+    log.value = t("log.empty");
+    uiStore.notify(t("log.cleared"));
+  } catch (e) {
+    uiStore.notify((e as Error).message);
+  } finally {
+    clearing.value = false;
   }
 }
 
@@ -33,6 +48,13 @@ onMounted(load);
 
     <MiuixCard class="card action-card">
       <div class="action-bar">
+        <MiuixButton
+          class="grow"
+          :disabled="loading || clearing"
+          @click="clear"
+        >
+          {{ t("log.clear") }}
+        </MiuixButton>
         <MiuixButton
           type="primary"
           class="grow"
@@ -60,6 +82,8 @@ onMounted(load);
   white-space: pre-wrap;
   word-break: break-all;
   color: var(--m-color-on-surface);
+  max-height: 50vh;
+  overflow-y: auto;
 }
 
 .action-card {

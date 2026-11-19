@@ -7,7 +7,7 @@
 #   config get                → 输出完整 config.json
 #   config import <base64>    → base64 解码后覆盖 config.json
 #   config path               → 输出 config.json 路径
-#   log [lines]               → 输出 openp2p 日志末尾 N 行
+#   log [lines|--clear]        → 输出 openp2p 日志末尾 N 行 (--clear 清空日志)
 #   tun                       → optun 虚拟网卡状态 JSON
 #   version                   → openp2p 二进制版本
 #   diag                      → 完整诊断 (网络/路由/iptables/进程/日志)
@@ -17,16 +17,17 @@
 
 MODDIR="$(cd "$(dirname "$0")" && pwd)"
 MODID=$(basename "$MODDIR")
-DATA_DIR="${MODDIR}"
-CONFIG_FILE="${DATA_DIR}/config/config.json"
+# 配置独立存放, 模块更新/重刷不会重置 (卸载时由 uninstall.sh 一并清理)
+CONFIG_DIR="/data/adb/openp2p-tunnel"
+CONFIG_FILE="${CONFIG_DIR}/config.json"
 DEFAULT_CONFIG="${MODDIR}/config/config.json"
-LOG_DIR="${DATA_DIR}/log"
+LOG_DIR="${MODDIR}/log"
 RUN_LOG="${LOG_DIR}/openp2p.log"
 OPENP2P="${MODDIR}/openp2p"
-UPDATE_STATE="${DATA_DIR}/update.state"
+UPDATE_STATE="${MODDIR}/update.state"
 MODULE_PROP="${MODDIR}/module.prop"
 
-mkdir -p "${DATA_DIR}/config" "${LOG_DIR}" 2>/dev/null
+mkdir -p "${CONFIG_DIR}" "${LOG_DIR}" 2>/dev/null
 
 HUMAN=0
 for a in "$@"; do
@@ -75,21 +76,21 @@ get_pid() { pgrep -x openp2p | head -1; }
 
 get_version() {
     # openp2p 核心版本 (3.x.y)。按可靠性多级回退:
-    # 1) 运行日志 (服务启动必写 "openp2p start. version: X.Y.Z", 不依赖运行环境)
-    # 2) 二进制内提取 (读本目录二进制, 最可靠)
-    # 3) openp2p -v (会先写 log, 若 log 目录不可写则 log.Fatal 退出, 故放最后)
+    # 1) openp2p -v (权威, 直接打印 OpenP2PVersion; 先 mkdir log 避免 log.Fatal 退出)
+    # 2) 运行日志 (服务启动必写 "openp2p start. version: X.Y.Z", 不依赖运行环境)
+    # 3) 二进制内提取 (位数过滤, 拒绝 "3.25.1390625802" 这类元数据垃圾串)
     local v=""
-    v=$(grep -hoE 'version: [0-9]+\.[0-9]+\.[0-9]+' \
-        "${MODDIR}/log/openp2p.log" 2>/dev/null \
-        | tail -1 | sed -E 's/version: //')
+    mkdir -p "${MODDIR}/log" 2>/dev/null
+    v=$(cd "$MODDIR" 2>/dev/null && "${OPENP2P}" -v 2>/dev/null | head -1)
+    if [ -z "$v" ]; then
+        v=$(grep -hoE 'version: [0-9]+\.[0-9]+\.[0-9]+' \
+            "${MODDIR}/log/openp2p.log" 2>/dev/null \
+            | tail -1 | sed -E 's/version: //')
+    fi
     if [ -z "$v" ]; then
         # 二进制内提取 3.x.y (取数值最大者 = OpenP2PVersion; 不能按字典序, "3.9.0" 字典序大于 "3.25.11")
         v=$(grep -aoE '3\.[0-9]+\.[0-9]+' "${OPENP2P}" 2>/dev/null \
-            | awk -F'[.]' '{ k = $2*1000 + $3; if (k > m) { m = k; b = $0 } } END { print b }')
-    fi
-    if [ -z "$v" ]; then
-        mkdir -p "${MODDIR}/log" 2>/dev/null
-        v=$(cd "$MODDIR" 2>/dev/null && "${OPENP2P}" -v 2>/dev/null | head -1)
+            | awk -F'[.]' 'length($2) <= 3 && length($3) <= 3 { k = $2*1000 + $3; if (k > m) { m = k; b = $0 } } END { print b }')
     fi
     echo "$v"
 }
@@ -263,6 +264,13 @@ cmd_config_import() {
 
 cmd_log() {
     local n="${1:-50}"
+    if [ "$n" = "--clear" ] || [ "$n" = "-c" ]; then
+        : > "$RUN_LOG" 2>/dev/null
+        : > "${LOG_DIR}/openp2p_console.log" 2>/dev/null
+        : > "${LOG_DIR}/openp2p_core.log" 2>/dev/null
+        [ "$HUMAN" = 1 ] && echo "日志已清除"
+        return 0
+    fi
     case "$n" in *[!0-9]*) n=50 ;; esac
     if [ -f "$RUN_LOG" ]; then tail -n "$n" "$RUN_LOG"; else echo "(无日志)"; fi
 }
@@ -377,12 +385,10 @@ cmd_netfix() {
     #    网络地址 "10.9.0.0/24"; 否则 ip route/rule 会因主机位非零而失败 (之前的 bug)。
     #    含轮转日志 *.log.0 (openp2p checkFile 会在超限时轮转, gateway 行可能已被轮走)。
     subnet=$(grep -m1 -hoE '"gateway"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+"' \
-        "${DATA_DIR}/log/openp2p.log" "${DATA_DIR}/log/openp2p.log".* \
         "${MODDIR}/log/openp2p.log" "${MODDIR}/log/openp2p.log".* 2>/dev/null \
         | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+')
     if [ -z "$subnet" ]; then
         subnet=$(grep -m1 -hoE 'start tun [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+' \
-            "${DATA_DIR}/log/openp2p.log" "${DATA_DIR}/log/openp2p.log".* \
             "${MODDIR}/log/openp2p.log" "${MODDIR}/log/openp2p.log".* 2>/dev/null \
             | head -1 | awk '{print $3}')
     fi
@@ -552,7 +558,7 @@ __update_worker() {
     newver=$(cd "$MODDIR" 2>/dev/null && "${OPENP2P}" -v 2>/dev/null | head -1)
     if [ -z "$newver" ]; then
         newver=$(grep -aoE '3\.[0-9]+\.[0-9]+' "${OPENP2P}" 2>/dev/null \
-            | awk -F'[.]' '{ k = $2*1000 + $3; if (k > m) { m = k; b = $0 } } END { print b }')
+            | awk -F'[.]' 'length($2) <= 3 && length($3) <= 3 { k = $2*1000 + $3; if (k > m) { m = k; b = $0 } } END { print b }')
     fi
     [ -z "$newver" ] && newver="${latest:-未知}"
 

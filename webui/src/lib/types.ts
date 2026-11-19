@@ -22,6 +22,7 @@ export interface AppConfig {
   Forcev6: boolean;
   MonitorInterval: string;
   Timezone: string;
+  AutoClearLog: boolean;
 }
 
 export interface ServiceStatus {

@@ -14,6 +14,12 @@ const tun = ref<TunStatus | null>(null);
 const busy = ref(false);
 const busyLabel = ref("");
 
+const ingLabel = {
+  start: "status.starting",
+  stop: "status.stopping",
+  restart: "status.restarting",
+} as const;
+
 const statusKind = computed<"checking" | "normal" | "abnormal">(() => {
   if (!status.value) return "checking";
   return status.value.running ? "normal" : "abnormal";
@@ -72,7 +78,7 @@ async function run(
   expectRunning: boolean,
 ): Promise<void> {
   busy.value = true;
-  busyLabel.value = t(`status.${action}ing`);
+  busyLabel.value = t(ingLabel[action]);
   try {
     await fn();
     const deadline = Date.now() + 15000;
