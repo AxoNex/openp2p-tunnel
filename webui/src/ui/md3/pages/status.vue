@@ -43,6 +43,17 @@ const statusColor = computed(() => {
   }
 });
 
+const statusOnColor = computed(() => {
+  switch (statusKind.value) {
+    case "normal":
+      return "var(--md-sys-color-on-primary-container)";
+    case "abnormal":
+      return "var(--md-sys-color-on-error-container)";
+    default:
+      return "var(--md-sys-color-on-secondary-container)";
+  }
+});
+
 async function load(): Promise<void> {
   try {
     const [s, tu] = await Promise.all([api.getStatus(), api.getTun()]);
@@ -95,7 +106,10 @@ onMounted(load);
 
 <template>
   <div>
-    <div class="md3-card" :style="{ background: statusColor }">
+    <div
+      class="md3-card banner"
+      :style="{ background: statusColor, color: statusOnColor }"
+    >
       <h2 class="md3-card-title">{{ statusTitle }}</h2>
       <p class="md3-card-desc">{{ statusSummary }}</p>
     </div>
@@ -182,14 +196,14 @@ onMounted(load);
         >
           {{ t("status.stop") }}
         </md-filled-button>
-        <md-filled-button
+        <md-filled-tonal-button
           v-if="status?.running"
           class="grow"
           :disabled="busy"
           @click="run('restart', api.restart, true)"
         >
           {{ t("status.restart") }}
-        </md-filled-button>
+        </md-filled-tonal-button>
       </div>
     </div>
   </div>

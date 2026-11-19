@@ -220,6 +220,12 @@
   margin: 0;
 }
 
+/* 状态横幅：背景为容器色时，标题/描述文字继承父级 color（on-*-container） */
+.md3-card.banner .md3-card-title,
+.md3-card.banner .md3-card-desc {
+  color: inherit;
+}
+
 .md3-section-title {
   font-size: 13px;
   font-weight: 600;
@@ -245,12 +251,14 @@
   font-size: 14px;
   font-weight: 500;
   color: var(--md-sys-color-on-surface);
+  overflow-wrap: anywhere;
 }
 
 .md3-row .copy span {
   display: block;
   font-size: 13px;
   color: var(--md-sys-color-on-surface-variant);
+  overflow-wrap: anywhere;
 }
 
 .md3-value {
@@ -258,6 +266,8 @@
   color: var(--md-sys-color-on-surface-variant);
   text-align: right;
   word-break: break-all;
+  min-width: 0;
+  max-width: 60%;
 }
 
 .md3-divider {
@@ -268,6 +278,7 @@
 
 .md3-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 4px 0;
 }
