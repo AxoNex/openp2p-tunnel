@@ -95,6 +95,7 @@ onMounted(load);
   padding: 8px;
   display: flex;
   align-items: center;
+  gap: 10px;
 }
 
 .action-bar .grow {
