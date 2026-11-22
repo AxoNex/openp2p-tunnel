@@ -118,6 +118,14 @@ kill_openp2p() {
     fi
 }
 
+# ===== P0: 网络切换主动检测 (netwatch) =====
+# 返回默认路由指纹 "接口|网关hex"。/proc/net/route 里 Destination=00000000 即默认路由;
+# 只依赖 procfs, 不依赖 toybox 版 ip, 兼容所有 Android 内核。WiFi↔蜂窝/换 AP/VPN 开关
+# 都会改变默认路由(接口或网关), 据此判断物理网络是否切换。
+get_net_fingerprint() {
+    awk '$2=="00000000" && $1!="*" { print $1 "|" $3; exit }' /proc/net/route 2>/dev/null
+}
+
 # ===== 自动补全 ServerIP =====
 # openp2p 没有 -serverip 命令行参数, 且运行时会在 init() 里用 resolveServerIP(ServerHost)
 # 重新解析域名并覆盖 config.json 的 ServerIP 字段。因此 ServerHost 一律以 WebUI 配置为准
@@ -152,6 +160,11 @@ auto_fill_serverip() {
 
 ensure_tun
 kill_openp2p
+
+# P0 netwatch 状态 (跨监控周期持久于本进程; 脚本重启后重新建立基线, 不触发误重启)
+NET_FP=""            # 最近一次稳定采用的默认路由指纹 "接口|网关hex"
+NET_PENDING_FP=""    # 去抖中待确认的新指纹
+NET_PENDING_SINCE="" # 待确认新指纹首次出现的时间戳(epoch 秒)
 
 while true; do
     MONITOR_INTERVAL=$(get_monitor_interval)
@@ -269,6 +282,42 @@ while true; do
                     fi
                 else
                     rm -f "$_down_file" 2>/dev/null
+                fi
+            fi
+
+            # ===== P0: 网络切换主动检测 (netwatch) =====
+            # Android 上 openp2p 死连检测慢(readLoop 40s / readTimeout 60s, keepAlive 因
+            # isAndroid() 不退出), 网络切换后要等 40~60s 才自愈。这里嗅探默认路由指纹,
+            # 变化稳定(去抖一个监控周期)后立即 netunpin + 强制重启 openp2p, 把检测从
+            # 40~60s 压到 ~一个监控周期。去抖避免 DHCP 续租/VPN 短暂抖动误杀。
+            if pgrep -x openp2p >/dev/null 2>&1; then
+                _net_fp=$(get_net_fingerprint)
+                if [ -n "$_net_fp" ]; then
+                    if [ -z "$NET_FP" ]; then
+                        # 首次采样(或脚本重启), 仅建立基线, 不触发重启
+                        NET_FP="$_net_fp"
+                        NET_PENDING_FP=""; NET_PENDING_SINCE=""
+                    elif [ "$_net_fp" != "$NET_FP" ]; then
+                        _net_now=$(date +%s 2>/dev/null)
+                        if [ -z "$NET_PENDING_FP" ] || [ "$NET_PENDING_FP" != "$_net_fp" ]; then
+                            # 检测到切换(或仍在抖动), 记录新指纹并(重新)计时
+                            NET_PENDING_FP="$_net_fp"
+                            NET_PENDING_SINCE="$_net_now"
+                            log "netwatch: 检测到网络切换 ${NET_FP} -> ${_net_fp}, 去抖中..."
+                        elif [ -n "$NET_PENDING_SINCE" ] && [ -n "$_net_now" ] \
+                            && [ $((_net_now - NET_PENDING_SINCE)) -ge "$SLEEP_SECONDS" ]; then
+                            # 新指纹稳定一个监控周期, 立即重启以快速重连
+                            log "netwatch: 网络已切换(${NET_FP} -> ${_net_fp}), 撤销 netpin 并重启 openp2p"
+                            "${MODDIR}/openp2pctl" netunpin 2>/dev/null
+                            kill_openp2p
+                            rm -f "${MODDIR}/.conn_down" 2>/dev/null
+                            NET_FP="$_net_fp"
+                            NET_PENDING_FP=""; NET_PENDING_SINCE=""
+                        fi
+                    else
+                        # 指纹回到基线(切换未实际发生/已恢复), 清空待定
+                        NET_PENDING_FP=""; NET_PENDING_SINCE=""
+                    fi
                 fi
             fi
 

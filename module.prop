@@ -1,7 +1,7 @@
 id=openp2p-tunnel
 name=OpenP2P Tunnel
-version=1.2.0
-versionCode=10120
+version=1.2.1
+versionCode=10121
 author=AxoNex
 description=OpenP2P 虚拟组网
 webuiIcon=webroot/icon.svg
